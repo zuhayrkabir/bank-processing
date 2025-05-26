@@ -1,0 +1,36 @@
+gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.env
+venv/
+.venv/
+*.egg-info/
+*.swp
+
+# Node/React
+node_modules/
+dist/
+.env
+.env.local
+npm-debug.log*
+
+# FastAPI
+*.db
+*.sqlite
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.temp
+temp/
