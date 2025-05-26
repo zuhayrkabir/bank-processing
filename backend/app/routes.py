@@ -1,67 +1,76 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
 import pandas as pd
 import tempfile
-import json
 import os
+import io
 
 router = APIRouter()
 
+def apply_filters(df, filters):
+    ops = {
+        "=": lambda col, val: col == val,
+        "!=": lambda col, val: col != val,
+        ">": lambda col, val: col > val,
+        "<": lambda col, val: col < val,
+        ">=": lambda col, val: col >= val,
+        "<=": lambda col, val: col <= val,
+        "contains": lambda col, val: col.str.contains(val, case=False, na=False),
+        "not_contains": lambda col, val: ~col.str.contains(val, case=False, na=False),
+    }
+
+    for rule in filters:
+        col = rule["column"]
+        op = rule["operation"]
+        val = rule["value"]
+
+        if op not in ops:
+            raise HTTPException(status_code=400, detail=f"Unsupported operation: {op}")
+
+        if col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{col}' does not exist")
+
+        # Apply filter
+        df = df[ops[op](df[col].astype(str), val)]
+
+    return df
+
 @router.post("/process")
-async def process_file(file: UploadFile = File(...), filters: str = Form(...)):
-    try:
-        print(f"📥 Received: {file.filename}")
-        print(f"📂 File type: {file.filename.split('.')[-1]}")
+async def process_file(
+    file: UploadFile = File(...),
+    filters: str = Form(None),
+    filetype: str = Form(...)
+):
+    print(f"📥 Received file: {file.filename}")
+    print(f"📂 File type: {filetype}")
+    if filters:
         print(f"🔍 Filters: {filters}")
 
-        if not file.filename.endswith(".xlsx"):
+    # Read file contents into pandas dataframe
+    try:
+        contents = await file.read()
+        if filetype == "xlsx":
+            df = pd.read_excel(io.BytesIO(contents))
+            if filters:
+                import json
+                filter_rules = json.loads(filters)
+                df = apply_filters(df, filter_rules)
+        elif filetype == "txt":
+            # Simple assumption: txt file is tab or comma separated, try both
+            try:
+                df = pd.read_csv(io.BytesIO(contents), delimiter="\t")
+            except:
+                df = pd.read_csv(io.BytesIO(contents), delimiter=",")
+        else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
-        # Save the uploaded file to a temporary location
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
-            temp_file.write(await file.read())
-            temp_file_path = temp_file.name
-
-        # Read the Excel file
-        df = pd.read_excel(temp_file_path)
-
-        # Parse filters JSON
-        filters_data = json.loads(filters)
-
-        # Apply filters
-        for rule in filters_data:
-            col = rule["column"]
-            op = rule["operation"]
-            val = rule["value"]
-
-            # Convert numeric strings to float/int when possible
-            try:
-                val = eval(val)
-            except:
-                pass  # Keep as string if eval fails
-
-            if op == "=":
-                df = df[df[col] == val]
-            elif op == "!=":
-                df = df[df[col] != val]
-            elif op == ">":
-                df = df[df[col] > val]
-            elif op == "<":
-                df = df[df[col] < val]
-            elif op == ">=":
-                df = df[df[col] >= val]
-            elif op == "<=":
-                df = df[df[col] <= val]
-            else:
-                raise HTTPException(status_code=400, detail=f"Unsupported operation: {op}")
-
-        # Save filtered data to Excel
-        output_path = tempfile.mktemp(suffix=".xlsx")
+        # Save output to temp file
+        tmpdir = tempfile.mkdtemp()
+        output_path = os.path.join(tmpdir, "processed_file.xlsx")
         df.to_excel(output_path, index=False)
-        print(f"✅ Filtered file saved to: {output_path}")
-
-        return FileResponse(output_path, filename="filtered_output.xlsx", media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error processing file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Return file as response
+    from fastapi.responses import FileResponse
+    return FileResponse(output_path, filename="processed_file.xlsx", media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
