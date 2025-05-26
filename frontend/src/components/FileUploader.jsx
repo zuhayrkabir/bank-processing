@@ -1,22 +1,11 @@
 import { useState } from "react";
 import axios from "axios";
-import {
-  Box,
-  Button,
-  TextField,
-  Select,
-  MenuItem,
-  Typography,
-  CircularProgress,
-  Paper,
-} from "@mui/material";
 
 function FileUploader() {
-  const [file, setFile] = useState(null);
+  const [activeTab, setActiveTab] = useState("txt");
+  const [txtFile, setTxtFile] = useState(null);
+  const [excelFile, setExcelFile] = useState(null);
   const [filters, setFilters] = useState([{ column: "", operation: "", value: "" }]);
-  const [loading, setLoading] = useState(false);
-
-  const operations = [ "=", "!=", ">", "<", ">=", "<=" ];
 
   const handleFilterChange = (index, field, value) => {
     const updated = [...filters];
@@ -28,13 +17,42 @@ function FileUploader() {
     setFilters([...filters, { column: "", operation: "", value: "" }]);
   };
 
-  const handleSubmit = async (e) => {
+  const handleTxtSubmit = async (e) => {
     e.preventDefault();
-    if (!file) return alert("Please upload a file first.");
-    setLoading(true);
+    if (!txtFile) {
+      alert("Please upload a TXT file.");
+      return;
+    }
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", txtFile);
+
+    try {
+      const res = await axios.post("http://localhost:8000/convert-txt", formData, {
+        responseType: "blob",
+      });
+
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "converted_file.xlsx");
+      document.body.appendChild(link);
+      link.click();
+    } catch (err) {
+      console.error(err);
+      alert("❌ Failed to convert TXT file.");
+    }
+  };
+
+  const handleExcelSubmit = async (e) => {
+    e.preventDefault();
+    if (!excelFile) {
+      alert("Please upload an Excel file.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", excelFile);
     formData.append("filters", JSON.stringify(filters));
 
     try {
@@ -50,80 +68,70 @@ function FileUploader() {
       link.click();
     } catch (err) {
       console.error(err);
-      alert("❌ Failed to upload and process file.");
-    } finally {
-      setLoading(false);
+      alert("❌ Failed to upload and process Excel file.");
     }
   };
 
   return (
-    <Paper elevation={3} sx={{ maxWidth: 600, margin: "auto", padding: 4, mt: 5 }}>
-      <Typography variant="h5" mb={3} align="center">
-        📁 Upload Excel & Apply Filters
-      </Typography>
-      <form onSubmit={handleSubmit}>
-        <Button variant="contained" component="label">
-          Choose File
-          <input
-            type="file"
-            hidden
-            accept=".xlsx"
-            onChange={(e) => setFile(e.target.files[0])}
-          />
-        </Button>
-        {file && (
-          <Typography variant="body2" mt={1}>
-            Selected file: {file.name}
-          </Typography>
-        )}
+    <div style={{ fontFamily: "Arial", padding: "20px" }}>
+      <h2>📁 Upload & Process Files</h2>
+      <div style={{ marginBottom: "20px" }}>
+        <button onClick={() => setActiveTab("txt")} style={{ marginRight: "10px" }}>
+          TXT Upload & Convert
+        </button>
+        <button onClick={() => setActiveTab("excel")}>Excel Upload & Filter</button>
+      </div>
 
-        {filters.map((filter, idx) => (
-          <Box key={idx} display="flex" gap={2} mt={2} alignItems="center">
-            <TextField
-              label="Column"
-              value={filter.column}
-              onChange={(e) => handleFilterChange(idx, "column", e.target.value)}
-              fullWidth
-            />
-            <Select
-              value={filter.operation}
-              onChange={(e) => handleFilterChange(idx, "operation", e.target.value)}
-              sx={{ width: 80 }}
-              displayEmpty
-            >
-              <MenuItem value="">Op</MenuItem>
-              {operations.map((op) => (
-                <MenuItem key={op} value={op}>
-                  {op}
-                </MenuItem>
-              ))}
-            </Select>
-            <TextField
-              label="Value"
-              value={filter.value}
-              onChange={(e) => handleFilterChange(idx, "value", e.target.value)}
-              fullWidth
-            />
-          </Box>
-        ))}
+      {activeTab === "txt" && (
+        <form onSubmit={handleTxtSubmit}>
+          <h3>TXT File ➡️ Excel</h3>
+          <input type="file" accept=".txt" onChange={e => setTxtFile(e.target.files[0])} required />
+          <br /><br />
+          <button type="submit">Convert to Excel</button>
+        </form>
+      )}
 
-        <Button sx={{ mt: 2 }} onClick={addFilter} variant="outlined">
-          + Add Filter
-        </Button>
-
-        <Box mt={3} textAlign="center">
-          <Button
-            type="submit"
-            variant="contained"
-            color="primary"
-            disabled={loading}
-            startIcon={loading && <CircularProgress size={20} />}
-          >
-            {loading ? "Processing..." : "🚀 Upload & Filter"}
-          </Button>
-        </Box>
-      </form>
-    </Paper>
+      {activeTab === "excel" && (
+        <form onSubmit={handleExcelSubmit}>
+          <h3>Excel File ➕ Filters</h3>
+          <input type="file" accept=".xlsx" onChange={e => setExcelFile(e.target.files[0])} required />
+          <br /><br />
+          {filters.map((filter, idx) => (
+            <div key={idx}>
+              <input
+                placeholder="Column"
+                value={filter.column}
+                onChange={e => handleFilterChange(idx, "column", e.target.value)}
+                required
+              />
+              <select
+                value={filter.operation}
+                onChange={e => handleFilterChange(idx, "operation", e.target.value)}
+                required
+              >
+                <option value="">Op</option>
+                <option value="=">=</option>
+                <option value="!=">!=</option>
+                <option value=">">&gt;</option>
+                <option value="<">&lt;</option>
+                <option value=">=">&gt;=</option>
+                <option value="<=">&lt;=</option>
+              </select>
+              <input
+                placeholder="Value"
+                value={filter.value}
+                onChange={e => handleFilterChange(idx, "value", e.target.value)}
+                required
+              />
+              <br />
+            </div>
+          ))}
+          <button type="button" onClick={addFilter}>+ Add Filter</button>
+          <br /><br />
+          <button type="submit">Upload & Filter Excel</button>
+        </form>
+      )}
+    </div>
   );
 }
 
