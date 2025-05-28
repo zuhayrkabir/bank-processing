@@ -2,9 +2,11 @@ import { useState } from "react";
 import axios from "axios";
 
 function FileUploader() {
-  const [activeTab, setActiveTab] = useState("txt"); // 'txt' or 'excel'
+  const [activeTab, setActiveTab] = useState("txt"); // 'txt', 'excel', or 'visa'
   const [file, setFile] = useState(null);
   const [filters, setFilters] = useState([{ column: "", operation: "", value: "" }]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState("");
 
   const handleFilterChange = (index, field, value) => {
     const updated = [...filters];
@@ -22,6 +24,9 @@ function FileUploader() {
       alert("⚠️ Please upload a file first.");
       return;
     }
+
+    setIsProcessing(true);
+    setError("");
 
     const formData = new FormData();
     formData.append("file", file);
@@ -41,7 +46,9 @@ function FileUploader() {
       link.click();
     } catch (err) {
       console.error(err);
-      alert("❌ Failed to upload and process Excel file.");
+      setError("❌ Failed to upload and process Excel file.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -52,12 +59,15 @@ function FileUploader() {
       return;
     }
 
+    setIsProcessing(true);
+    setError("");
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("filetype", "txt");
 
     try {
-      const res = await axios.post("http://localhost:8000/process", formData, {
+      const res = await axios.post("http://localhost:8000/convert-txt", formData, {
         responseType: "blob",
       });
 
@@ -69,7 +79,41 @@ function FileUploader() {
       link.click();
     } catch (err) {
       console.error(err);
-      alert("❌ Failed to upload and convert TXT file.");
+      setError("❌ Failed to upload and convert TXT file.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleVisaSubmit = async (e) => {
+    e.preventDefault();
+    if (!file) {
+      setError("⚠️ Please upload a Visa Report TXT file.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await axios.post("http://localhost:8000/process-visa-report", formData, {
+        responseType: "blob",
+      });
+
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "visa_report.xlsx");
+      document.body.appendChild(link);
+      link.click();
+    } catch (err) {
+      console.error(err);
+      setError("❌ Failed to process Visa Report.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -99,7 +143,7 @@ function FileUploader() {
           style={{
             textAlign: "center",
             marginBottom: "30px",
-            color: "#000000", // Black text
+            color: "#000000",
             fontWeight: "700",
             fontSize: "2rem",
           }}
@@ -113,18 +157,19 @@ function FileUploader() {
             onClick={() => {
               setActiveTab("txt");
               setFile(null);
+              setError("");
             }}
             style={{
               backgroundColor: activeTab === "txt" ? "#333" : "#666",
               border: "none",
-              borderRadius: "8px 0 0 8px",
-              padding: "12px 30px",
+              borderRadius: "8px 0 0 0",
+              padding: "12px 20px",
               cursor: "pointer",
               color: "white",
               fontWeight: "600",
-              fontSize: "16px",
+              fontSize: "14px",
               boxShadow: activeTab === "txt" ? "0 4px 8px rgba(0,0,0,0.3)" : "none",
-              transition: "background-color 0.3s",
+              transition: "all 0.3s",
             }}
           >
             📄 TXT to Excel
@@ -133,23 +178,61 @@ function FileUploader() {
             onClick={() => {
               setActiveTab("excel");
               setFile(null);
+              setError("");
             }}
             style={{
               backgroundColor: activeTab === "excel" ? "#333" : "#666",
               border: "none",
-              borderRadius: "0 8px 8px 0",
-              padding: "12px 30px",
+              borderLeft: "1px solid #444",
+              borderRight: "1px solid #444",
+              padding: "12px 20px",
               cursor: "pointer",
               color: "white",
               fontWeight: "600",
-              fontSize: "16px",
+              fontSize: "14px",
               boxShadow: activeTab === "excel" ? "0 4px 8px rgba(0,0,0,0.3)" : "none",
-              transition: "background-color 0.3s",
+              transition: "all 0.3s",
             }}
           >
             📊 Excel Filters
           </button>
+          <button
+            onClick={() => {
+              setActiveTab("visa");
+              setFile(null);
+              setError("");
+            }}
+            style={{
+              backgroundColor: activeTab === "visa" ? "#333" : "#666",
+              border: "none",
+              borderRadius: "0 8px 0 0",
+              padding: "12px 20px",
+              cursor: "pointer",
+              color: "white",
+              fontWeight: "600",
+              fontSize: "14px",
+              boxShadow: activeTab === "visa" ? "0 4px 8px rgba(0,0,0,0.3)" : "none",
+              transition: "all 0.3s",
+            }}
+          >
+            💳 Visa Report
+          </button>
         </div>
+
+        {/* Error message */}
+        {error && (
+          <div style={{
+            backgroundColor: "#ffebee",
+            color: "#d32f2f",
+            padding: "10px",
+            borderRadius: "4px",
+            marginBottom: "20px",
+            textAlign: "center",
+            fontWeight: "600"
+          }}>
+            {error}
+          </div>
+        )}
 
         {/* TXT tab */}
         {activeTab === "txt" && (
@@ -178,23 +261,25 @@ function FileUploader() {
               style={{ display: "none" }}
               required
             />
+            {file && <p style={{ marginTop: "1px", color: "#333", fontWeight: "600" }}>&#9989; Selected file: {file.name}</p>}
             <br />
             <button
               type="submit"
+              disabled={isProcessing}
               style={{
                 padding: "12px 30px",
-                backgroundColor: "#333",
+                backgroundColor: isProcessing ? "#777" : "#333",
                 color: "white",
                 border: "none",
                 borderRadius: "8px",
-                cursor: "pointer",
+                cursor: isProcessing ? "not-allowed" : "pointer",
                 fontWeight: "600",
                 fontSize: "16px",
                 boxShadow: "0 4px 8px rgba(0,0,0,0.2)",
-                transition: "background-color 0.3s",
+                transition: "all 0.3s",
               }}
             >
-              🔄 Convert to Excel
+              {isProcessing ? "Processing..." : "🔄 Convert to Excel"}
             </button>
           </form>
         )}
@@ -211,7 +296,7 @@ function FileUploader() {
                 color: "white",
                 borderRadius: "8px",
                 cursor: "pointer",
-                marginBottom: "20px",
+                marginBottom: "5px",
                 fontWeight: "600",
                 fontSize: "15px",
               }}
@@ -226,6 +311,8 @@ function FileUploader() {
               style={{ display: "none" }}
               required
             />
+            {file && <p style={{ marginTop: "1px", color: "#333", fontWeight: "600" }}>&#9989; Selected file: {file.name}</p>}
+            <br />
             <br />
             <div style={{ marginBottom: "15px" }}>
               {filters.map((filter, idx) => (
@@ -316,20 +403,87 @@ function FileUploader() {
             <br />
             <button
               type="submit"
+              disabled={isProcessing}
               style={{
                 padding: "14px 40px",
-                backgroundColor: "#333",
+                backgroundColor: isProcessing ? "#777" : "#333",
                 color: "white",
                 border: "none",
                 borderRadius: "8px",
-                cursor: "pointer",
+                cursor: isProcessing ? "not-allowed" : "pointer",
                 fontWeight: "700",
                 fontSize: "18px",
                 boxShadow: "0 6px 14px rgba(0,0,0,0.3)",
-                transition: "background-color 0.3s",
+                transition: "all 0.3s",
               }}
             >
-              🚀 Upload & Filter
+              {isProcessing ? "Processing..." : "🚀 Upload & Filter"}
+            </button>
+          </form>
+        )}
+
+        {/* Visa Report tab */}
+        {activeTab === "visa" && (
+          <form onSubmit={handleVisaSubmit} style={{ textAlign: "center" }}>
+            <label
+              htmlFor="visa-file-upload"
+              style={{
+                display: "inline-block",
+                padding: "12px 20px",
+                backgroundColor: "#555",
+                color: "white",
+                borderRadius: "8px",
+                cursor: "pointer",
+                marginBottom: "20px",
+                fontWeight: "600",
+                fontSize: "15px",
+              }}
+            >
+              💳 Choose Visa Report (TXT)
+            </label>
+            <input
+              id="visa-file-upload"
+              type="file"
+              accept=".txt"
+              onChange={(e) => setFile(e.target.files[0])}
+              style={{ display: "none" }}
+              required
+            />
+            {file && <p style={{ marginTop: "1px", color: "#333", fontWeight: "600" }}>&#9989; Selected file: {file.name}</p>}
+            <div style={{ 
+              backgroundColor: "#f8f9fa",
+              padding: "15px",
+              borderRadius: "8px",
+              margin: "20px 0",
+              textAlign: "left",
+              borderLeft: "4px solid #4a6bff"
+            }}>
+              <p style={{ margin: "0 0 10px 0", fontWeight: "600" }}>Will extract:</p>
+              <ul style={{ paddingLeft: "20px", margin: 0 }}>
+                <li>Report headers (ID, dates, currency)</li>
+                <li>Interchange values</li>
+                <li>Reimbursement fees</li>
+                <li>Visa charges</li>
+                <li>Net settlement amounts</li>
+              </ul>
+            </div>
+            <button
+              type="submit"
+              disabled={isProcessing}
+              style={{
+                padding: "14px 40px",
+                backgroundColor: isProcessing ? "#777" : "#333",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: isProcessing ? "not-allowed" : "pointer",
+                fontWeight: "700",
+                fontSize: "18px",
+                boxShadow: "0 6px 14px rgba(0,0,0,0.3)",
+                transition: "all 0.3s",
+              }}
+            >
+              {isProcessing ? "Processing..." : "🚀 Process Visa Report"}
             </button>
           </form>
         )}
