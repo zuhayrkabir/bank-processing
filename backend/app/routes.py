@@ -6,6 +6,7 @@ import tempfile
 import io
 import json
 import re
+import openpyxl
 from datetime import datetime
 from typing import Dict
 
@@ -120,13 +121,14 @@ def parse_visa_report(content: str) -> Dict:
     # Parse headers (unchanged)
     headers = {
         'ReportID': r'REPORT ID:\s+(VSS-\d+)',
-        'ReportingFor': r'REPORTING FOR:\s+(.+?)\s+BIN',
-        'RollupTo': r'ROLLUP TO:\s+(.+?)\s+BA',
+        'ReportingFor': r'REPORTING FOR:\s+(.+?)\s+PROC',
+        'RollupTo': r'ROLLUP TO:\s+(.+?)\s+SETTLEMENT',
         'FundsXferEntity': r'FUNDS XFER ENTITY:\s+(.+?)\n',
         'ProcDate': r'PROC DATE:\s+(\d{2}[A-Za-z]{3}\d{2})',
         'ReportDate': r'REPORT DATE:\s+(\d{2}[A-Za-z]{3}\d{2})',
         'SettlementCurrency': r'SETTLEMENT CURRENCY:\s+([A-Z]{3})'
     }
+
     for field, pattern in headers.items():
         if match := re.search(pattern, content):
             data[field] = match.group(1).strip()
@@ -157,103 +159,117 @@ def parse_visa_report(content: str) -> Dict:
     ]
 
     for section in sections:
+        print(f"\n🔍 Parsing section: {section['name']}")
         if section_match := re.search(section['pattern'], content, re.DOTALL):
             section_content = section_match.group(1)
-            # print(f"\n--- {section['name']} Section Content ---\n{section_content}\n--------------------------") # Debugging line
-            
+
             for line_type in section['line_types']:
-                # The key is to match the exact spacing and potential optionality of fields
+                print(f"  ➤ Looking for line: TOTAL {line_type} in {section['name']}")
+
                 if section['name'] == 'Interchange':
-                    # Pattern for Interchange which includes Count (always present) and then 3 amounts (optional)
-                    # Using non-greedy matches for amounts to prevent issues if there's text after
-                    pattern = rf'TOTAL {line_type}\s+([\d,]+)\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?'
+                    pattern = rf'TOTAL {line_type}\s+(\d+)\s+([\d,]+\.\d{{2}}(?:CR|DB)?)?\s+([\d,]+\.\d{{2}}(?:CR|DB)?)?\s+([\d,]+\.\d{{2}}(?:CR|DB)?)?'
                 else:
-                    # Pattern for Reimbursement and VisaCharges without Count, just 3 amounts (optional)
-                    pattern = rf'TOTAL {line_type}\s+([\d,]+\.\d{{2}}[A-Z]{{0-2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0-2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0-2}})?'
-                
+                    pattern = rf'TOTAL {line_type}\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?'
+
                 if match := re.search(pattern, section_content):
-                    # print(f"  Matched {line_type} in {section['name']}: {match.groups()}") # Debugging line
-                    start_idx = 1 
+                    print(f"    ✅ Match found: {match.groups()}")
+
+                    start_idx = 1
                     if section['name'] == 'Interchange':
-                        data[f"{section['name']}_{line_type}_Count"] = int(match.group(start_idx)) if match.group(start_idx) else 0
+                        count_val = match.group(start_idx)
+                        data[f"{section['name']}_{line_type}_Count"] = int(count_val) if count_val else 0
+                        print(f"    ↪ Count: {data[f'{section['name']}_{line_type}_Count']}")
                         start_idx += 1
-                    
-                    data[f"{section['name']}_{line_type}_CreditAmount"] = parse_amount(match.group(start_idx))
-                    data[f"{section['name']}_{line_type}_DebitAmount"] = parse_amount(match.group(start_idx + 1))
-                    data[f"{section['name']}_{line_type}_TotalAmount"] = parse_amount(match.group(start_idx + 2))
-                # else:
-                    # print(f"  No match for {line_type} in {section['name']}") # Debugging line
+
+                    credit = match.group(start_idx)
+                    debit = match.group(start_idx + 1)
+                    total = match.group(start_idx + 2)
+
+                    data[f"{section['name']}_{line_type}_CreditAmount"] = parse_amount(credit)
+                    data[f"{section['name']}_{line_type}_DebitAmount"] = parse_amount(debit)
+                    data[f"{section['name']}_{line_type}_TotalAmount"] = parse_amount(total)
+
+                    print(f"    ↪ Credit: {credit} ➜ {data[f'{section['name']}_{line_type}_CreditAmount']}")
+                    print(f"    ↪ Debit:  {debit} ➜ {data[f'{section['name']}_{line_type}_DebitAmount']}")
+                    print(f"    ↪ Total:  {total} ➜ {data[f'{section['name']}_{line_type}_TotalAmount']}")
+                else:
+                    print(f"    ❌ No match for TOTAL {line_type} in {section['name']}")
 
             # Parse section total
+            print(f"  ➤ Looking for section TOTAL in {section['name']}")
             if total_match := re.search(section['total_pattern'], content):
-                # print(f"  Matched Total for {section['name']}: {total_match.groups()}") # Debugging line
+                print(f"    ✅ Section total match: {total_match.groups()}")
+
                 start_idx = 1
                 if section['name'] == 'Interchange':
-                    data[f"{section['name']}_Total_Count"] = int(total_match.group(start_idx)) if total_match.group(start_idx) else 0
+                    count_val = total_match.group(start_idx)
+                    data[f"{section['name']}_Total_Count"] = int(count_val) if count_val else 0
+                    print(f"    ↪ Total Count: {data[f'{section['name']}_Total_Count']}")
                     start_idx += 1
-                
+
                 data[f"{section['name']}_Total_CreditAmount"] = parse_amount(total_match.group(start_idx))
                 data[f"{section['name']}_Total_DebitAmount"] = parse_amount(total_match.group(start_idx + 1))
                 data[f"{section['name']}_Total_TotalAmount"] = parse_amount(total_match.group(start_idx + 2))
-            # else:
-                # print(f"  No Total match for {section['name']}") # Debugging line
 
+                print(f"    ↪ Section Credit: {data[f'{section['name']}_Total_CreditAmount']}")
+                print(f"    ↪ Section Debit:  {data[f'{section['name']}_Total_DebitAmount']}")
+                print(f"    ↪ Section Total:  {data[f'{section['name']}_Total_TotalAmount']}")
+            else:
+                print(f"    ❌ No total match for {section['name']}")
 
-    # Parse Settlement (special case)
-    # The pattern for extracting settlement content needs to be precise.
-    # It should capture all lines between 'TOTAL' and 'NET SETTLEMENT AMOUNT' that represent ACQUIRER, ISSUER, OTHER totals.
-    # Re-evaluating the settlement block extraction for robustness
-    if settlement_block_match := re.search(r'(TOTAL\s+(?:ACQUIRER|ISSUER|OTHER).*?)(NET SETTLEMENT AMOUNT)', content, re.DOTALL):
-        settlement_block_content = settlement_block_match.group(1) # This should contain the ACQUIRER, ISSUER, OTHER lines
-        # print(f"\n--- Settlement Block Content ---\n{settlement_block_content}\n--------------------------") # Debugging line
+    # Parse settlement section
+    print("\n🔍 Parsing Settlement Section")
+    if settlement_block_match := re.search(r'(TOTAL\s+(?:ACQUIRER|ISSUER|OTHER).*?)(END OF)', content, re.DOTALL):
+        settlement_block_content = settlement_block_match.group(1)
 
         for line_type in ['ACQUIRER', 'ISSUER', 'OTHER']:
-            # This regex is specifically looking for "TOTAL ACQUIRER", "TOTAL ISSUER", "TOTAL OTHER" lines
-            # within the settlement block and capturing the three amount columns.
             pattern = rf'TOTAL {line_type}\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?\s+([\d,]+\.\d{{2}}[A-Z]{{0,2}})?'
             if match := re.search(pattern, settlement_block_content):
-                # print(f"  Matched {line_type} in Settlement: {match.groups()}") # Debugging line
+                print(f"  ✅ Settlement {line_type}: {match.groups()}")
                 data[f'Settlement_Total{line_type}_CreditAmount'] = parse_amount(match.group(1))
                 data[f'Settlement_Total{line_type}_DebitAmount'] = parse_amount(match.group(2))
                 data[f'Settlement_Total{line_type}_TotalAmount'] = parse_amount(match.group(3))
-            # else:
-                # print(f"  No match for {line_type} in Settlement block") # Debugging line
+            else:
+                print(f"  ❌ No match for TOTAL {line_type} in Settlement")
 
-
-    if net_match := re.search(r'NET SETTLEMENT AMOUNT\s+([\d,]+\.\d{2}[A-Z]{0,2})?\s+([\d,]+\.\d{2}[A-Z]{0,2})?\s+([\d,]+\.\d{2}[A-Z]{0-2})?', content):
-        # print(f"  Matched Net Settlement: {net_match.groups()}") # Debugging line
+    if net_match := re.search(r'NET SETTLEMENT AMOUNT\s+([\d,]+\.\d{2}[A-Z]{0,2})?\s+([\d,]+\.\d{2}[A-Z]{0,2})?\s+([\d,]+\.\d{2}[A-Z]{0,2})?', content):
+        print(f"  ✅ Matched Net Settlement: {net_match.groups()}")
         data['Settlement_Net_CreditAmount'] = parse_amount(net_match.group(1))
         data['Settlement_Net_DebitAmount'] = parse_amount(net_match.group(2))
         data['Settlement_Net_TotalAmount'] = parse_amount(net_match.group(3))
-    # else:
-        # print("  No match for Net Settlement Amount") # Debugging line
+    else:
+        print("  ❌ No match for NET SETTLEMENT AMOUNT")
 
+
+    print("Dictionary", data)
     return data
+
+
 
 
 def transform_report_data_to_rows(data: dict) -> pd.DataFrame:
     metadata_cols = ['ReportID', 'ReportingFor', 'RollupTo', 'FundsXferEntity', 
-                    'ProcDate', 'ReportDate', 'SettlementCurrency']
+                   'ProcDate', 'ReportDate', 'SettlementCurrency']
     
     sections = [
         {
             'MajorType': 'Interchange',
-            'MinorTypes': ['Acquirer', 'Issuer', 'Other', 'Total'], # Changed MinorTypes to match parsed data keys more directly
+            'MinorTypes': ['ACQUIRER', 'ISSUER', 'OTHER', 'Total'],
             'Fields': ['Count', 'CreditAmount', 'DebitAmount', 'TotalAmount']
         },
         {
             'MajorType': 'Reimbursement',
-            'MinorTypes': ['Acquirer', 'Issuer', 'Other', 'Total'],
+            'MinorTypes': ['ACQUIRER', 'ISSUER', 'OTHER', 'Total'],
             'Fields': ['CreditAmount', 'DebitAmount', 'TotalAmount']
         },
         {
             'MajorType': 'VisaCharges',
-            'MinorTypes': ['Acquirer', 'Issuer', 'Other', 'Total'],
+            'MinorTypes': ['ACQUIRER', 'ISSUER', 'OTHER', 'Total'],
             'Fields': ['CreditAmount', 'DebitAmount', 'TotalAmount']
         },
         {
             'MajorType': 'Settlement',
-            'MinorTypes': ['Acquirer', 'Issuer', 'Other', 'Net'],
+            'MinorTypes': ['ACQUIRER', 'ISSUER', 'OTHER', 'Net'],
             'Fields': ['CreditAmount', 'DebitAmount', 'TotalAmount']
         }
     ]
@@ -264,70 +280,134 @@ def transform_report_data_to_rows(data: dict) -> pd.DataFrame:
         for minor_type in section['MinorTypes']:
             row = {col: data.get(col, '') for col in metadata_cols}
             row['MajorType'] = section['MajorType']
+            if(section['MajorType'] == 'Settlement'):
+                row['MajorType'] = 'Total'
             row['MinorType'] = minor_type
+            if(minor_type == 'Net'):
+                row['MinorType'] = "Net Settlement Amount"
             
             for field in section['Fields']:
-                # Construct the key based on how it's stored in parse_visa_report
-                # For line types like 'ACQUIRER', 'ISSUER', 'OTHER', the key will be 'MajorType_MinorType_Field'
-                # For 'Total' and 'Net', it will be 'MajorType_Total_Field' or 'Settlement_Net_Field'
-                
-                if minor_type in ['Acquirer', 'Issuer', 'Other']:
-                    key = f"{section['MajorType']}_{minor_type}_{field}"
-                elif minor_type == 'Total': # for section totals
-                    key = f"{section['MajorType']}_Total_{field}"
-                elif minor_type == 'Net' and section['MajorType'] == 'Settlement':
+                # Construct the key based on the actual parsing output
+                if minor_type == 'Net':
                     key = f"Settlement_Net_{field}"
+                elif minor_type == 'Total':
+                    key = f"{section['MajorType']}_Total_{field}"
                 else:
-                    # Fallback or error if a minor_type doesn't fit
+                    # Match the exact case used in parsing (ACQUIRER, ISSUER, OTHER)
                     key = f"{section['MajorType']}_{minor_type}_{field}"
-
-
-                value = data.get(key, 0.0 if 'Amount' in field else 0)  # Default to 0.0 for amounts, 0 for count
                 
-                # Ensure values are correctly typed for DataFrame
-                if isinstance(value, (int, float)):
-                    pass 
-                elif isinstance(value, str) and value.replace('.', '', 1).isdigit():
-                    value = float(value) if 'Amount' in field else int(value)
-                else: # Handle cases where value might be an empty string or other non-numeric
-                    value = 0.0 if 'Amount' in field else 0
-
-                row[field] = value
+                # Get value with proper fallback
+                value = data.get(key)
+                
+                # Convert to appropriate type
+                if value is None:
+                    row[field] = 0.0 if 'Amount' in field else 0
+                elif isinstance(value, (int, float)):
+                    row[field] = value
+                else:
+                    try:
+                        row[field] = float(value) if 'Amount' in field else int(value)
+                    except (ValueError, TypeError):
+                        row[field] = 0.0 if 'Amount' in field else 0
             
             rows.append(row)
     
     df = pd.DataFrame(rows)
     column_order = metadata_cols + ['MajorType', 'MinorType', 'Count', 
-                                  'CreditAmount', 'DebitAmount', 'TotalAmount']
+                                 'CreditAmount', 'DebitAmount', 'TotalAmount']
     
-    # print("Parsed Data Keys:")
-    # print(sorted(data.keys()))
-    # print("\nSample Values (from parsed_data dict):")
-    # print("Interchange_Acquirer_Count:", data.get('Interchange_Acquirer_Count')) 
-    # print("Reimbursement_Acquirer_DebitAmount:", data.get('Reimbursement_Acquirer_DebitAmount'))
-    # print("VisaCharges_Issuer_DebitAmount:", data.get('VisaCharges_Issuer_DebitAmount'))
-    # print("Settlement_Net_TotalAmount:", data.get('Settlement_Net_TotalAmount'))
+    # Convert amount columns to numeric, handling missing values
+    amount_cols = ['CreditAmount', 'DebitAmount', 'TotalAmount']
+    for col in amount_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+    
+    # Fill Count NaN with 0
+    if 'Count' in df.columns:
+        df['Count'] = df['Count'].fillna(0).astype(int)
+
+    df['TotalType'] = df['TotalAmount'].apply(lambda x: 'CR' if x >= 0 else 'DB')
+    df['TotalAmount'] = df['TotalAmount'].abs()
+    column_order = metadata_cols + ['MajorType', 'MinorType', 'Count', 
+                                'CreditAmount', 'DebitAmount', 'TotalAmount', 'TotalType']
     
     return df[column_order]
 
+
+
+def process_multiple_visa_reports(content: str) -> pd.DataFrame:
+    # Split content into multiple reports
+    reports = content.strip().split("*** END OF VSS-110 REPORT ***")
+
+    final_rows = []
+
+    for idx, report_text in enumerate(reports):
+        report_text = report_text.strip()
+        if not report_text:
+            continue
+
+        print(f"\n📄 Processing Report #{idx+1}...")
+
+        try:
+            parsed = parse_visa_report(report_text)
+            df = transform_report_data_to_rows(parsed)
+            final_rows.append(df)
+        except Exception as e:
+            print(f"⚠️ Failed to process report #{idx+1}: {e}")
+
+    combined_df = pd.concat(final_rows, ignore_index=True)
+    return combined_df
+
+
+
+def autosize_excel_columns(filename):
+    wb = openpyxl.load_workbook(filename)
+    ws = wb.active
+
+    for column_cells in ws.columns:
+        max_length = 0
+        col_letter = openpyxl.utils.get_column_letter(column_cells[0].column)
+        for cell in column_cells:
+            if cell.value:
+                cell_len = len(str(cell.value))
+                if cell_len > max_length:
+                    max_length = cell_len
+        adjusted_width = (max_length + 2)
+        ws.column_dimensions[col_letter].width = adjusted_width
+
+    wb.save(filename)
+
+
+from fastapi.responses import StreamingResponse
+import mimetypes
+
 @router.post("/process-visa-report")
-async def process_visa_report(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
-    try:
-        contents = await file.read()
-        parsed_data = parse_visa_report(contents.decode("utf-8"))
-        df = transform_report_data_to_rows(parsed_data)
+async def process_visa_report(file: UploadFile = File(...)):
+    contents = await file.read()
+    content_str = contents.decode("utf-8")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-            output_path = tmp.name
-            df.to_excel(output_path, index=False)
+    df = process_multiple_visa_reports(content_str)
 
-        background_tasks.add_task(os.unlink, output_path)
+    # Extract values from second row
+    if len(df) > 1:
+        second_row = df.iloc[1]
+        report_id = str(second_row.get('ReportID', 'VSS-000')).replace("/", "-")
+        proc_date = str(second_row.get('ProcDate', 'nodate')).replace("/", "-")
+        report_date = str(second_row.get('ReportDate', 'nodate')).replace("/", "-")
+        filename = f"{report_id}.{proc_date}.{report_date}.xlsx"
+    else:
+        filename = "visa_report.xlsx"
 
-        return FileResponse(
-            output_path,
-            filename="visa_report.xlsx",
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            background=background_tasks
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process Visa report: {str(e)}")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        output_path = tmp.name
+        df.to_excel(output_path, index=False)
+        autosize_excel_columns(output_path)
+
+    file_stream = open(output_path, "rb")
+    return StreamingResponse(
+        file_stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
+

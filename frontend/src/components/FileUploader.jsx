@@ -103,10 +103,21 @@ function FileUploader() {
         responseType: "blob",
       });
 
+      // Extract filename from headers
+      const disposition = res.headers["content-disposition"];
+      let filename = "visa_report.xlsx"; // fallback
+
+      if (disposition && disposition.includes("filename=")) {
+        filename = disposition
+          .split("filename=")[1]
+          .replace(/['"]/g, "")
+          .trim();
+      }
+
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", "visa_report.xlsx");
+      link.setAttribute("download", filename);
       document.body.appendChild(link);
       link.click();
     } catch (err) {
