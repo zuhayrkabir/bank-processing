@@ -37,7 +37,7 @@ The system parses `.txt` Visa reports into structured Excel files and optionally
 Here is the basic setup for the frontend and backend
 
 1. Backend (FastAPI)
-bash
+```bash
 cd backend
 python -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
@@ -46,7 +46,7 @@ uvicorn app.main:app --reload
 
 
 2. Frontend (React):
-cd frontend
+```cd frontend
 npm install
 npm run dev
 
