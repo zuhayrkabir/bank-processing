@@ -28,18 +28,7 @@ The system parses `.txt` Visa reports into structured Excel files and optionally
 ---
 
 ## 📁 Folder Structure
-project-root/
-├── frontend/ # React app
-├── backend/
-│ ├── app/
-│ │ ├── main.py # FastAPI entry
-│ │ ├── routes.py # API routes
-│ │ ├── models.py # SQLAlchemy models
-│ │ ├── database.py # DB config
-│ │ └── ... # Parsing & utils
-├── README.md
-└── requirements.txt
-
+<img width="295" alt="image" src="https://github.com/user-attachments/assets/380fdea7-e883-4c02-bf74-10846d017311" />
 
 ---
 
@@ -61,21 +50,8 @@ npm run dev
 
 
 
-REPORT ID: VSS-100000
-PROC DATE: 01Jan25
-REPORT DATE: 02Jan25
-...
 
-                      Count        Credit            Debit              Total
-
-TOTAL ISSUER          5,050     4,479,326.75     20,653,197.06     16,173,870.31DB
-...
-***End of VS-1100 report***
-
-
-
-
-                                                        ### Built by Zuhayr Kabir during a Software Internship @ Bank Asia ###
+### Built by Zuhayr Kabir during a Software Internship @ Bank Asia ###
 
 
 
