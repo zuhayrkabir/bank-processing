@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi import UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from .routes import router
+from .database import engine
+from .models import VisaReportLine
 
 app = FastAPI()
 
@@ -19,6 +21,12 @@ app.add_middleware(
     allow_headers=["*"],     # Allows all headers
     expose_headers=["*"]     # Exposes all headers to frontend
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    # Create all tables defined in models.py
+    VisaReportLine.__table__.create(bind=engine, checkfirst=True)
 
 @app.get("/")
 async def root():
